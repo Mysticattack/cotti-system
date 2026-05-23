@@ -155,3 +155,5 @@ Antwort + „— Cotti System" Footer zurücksenden
 | `discord.respondToDMs` | `true` | Auf DMs antworten |
 | `discord.respondToMentions` | `true` | Auf Mentions antworten |
 | `discord.blocklist` | `[]` | Blockierte Discord User-IDs |
+"# cotti-system" 
+"# cotti-system" 
