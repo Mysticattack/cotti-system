@@ -1,0 +1,18 @@
+[Unit]
+Description=Cotti System – WhatsApp & Discord KI Bot
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/cotti-system
+ExecStart=/usr/bin/node /opt/cotti-system/index.js
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cotti-system
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
