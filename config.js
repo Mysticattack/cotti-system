@@ -5,6 +5,8 @@ module.exports = {
     model: 'llama3',
     // Maximale Nachrichten im Chatverlauf die mitgeschickt werden
     contextMessages: 10,
+    // Timeout in Millisekunden fuer Ollama-Anfragen (120s fuer grosse Modelle)
+    timeout: 120000,
   },
 
   // Footer der unter jede Antwort geschrieben wird
@@ -36,6 +38,12 @@ module.exports = {
     respondToMentions: true,
   },
 
+  // Bildgenerierung
+  image: {
+    // API Key von stablediffusionapi.com (via .env)
+    stableDiffusionApiKey: process.env.STABLEDIFFUSION_API_KEY,
+  },
+
   // Datei-Sharing Einstellungen
   files: {
     shareFolder: './shared-files',
@@ -44,5 +52,19 @@ module.exports = {
   // Rate Limiting
   rateLimit: {
     maxPerMinute: 10,
+  },
+
+  // Text-to-Speech (edge-tts, kein API-Key noetig)
+  tts: {
+    enabled: true,
+    // Stimme: https://aka.ms/edge-tts-voices
+    voice: 'de-DE-KatjaNeural',
+  },
+
+  // Web-Suche via DuckDuckGo (kein API-Key noetig)
+  search: {
+    enabled: true,
+    maxResults: 3,
+    timeoutMs: 5000,
   },
 };

@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Partials, ChannelType } = require('discord.js');
 const config = require('../config');
 const { askOllama } = require('./ollama');
+const { webSearch, shouldSearch, buildSearchContext } = require('./search');
 const logger = require('./logger');
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -113,11 +114,18 @@ async function handleDiscordMessage(client, message) {
     message.channel.sendTyping().catch(() => {});
   }, 8000);
 
+  // Web-Suche vor Ollama-Aufruf (kein API-Key noetig, via DuckDuckGo)
+  let searchContext = null;
+  if (config.search?.enabled !== false && shouldSearch(userText)) {
+    const results = await webSearch(userText);
+    searchContext = buildSearchContext(results);
+  }
+
   try {
     // Eindeutige Chat-ID (DM = User-ID, Server = Channel-ID)
     const chatId = isDM ? `discord_dm_${userId}` : `discord_ch_${message.channel.id}`;
 
-    const reply = await askOllama(chatId, fullPrompt, 'Discord');
+    const reply = await askOllama(chatId, fullPrompt, 'Discord', searchContext);
 
     // Discord hat 2000-Zeichen-Limit -> ggf. aufteilen
     const fullReply = reply + config.footer;

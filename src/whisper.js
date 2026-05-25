@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const config = require('../config');
 const logger = require('./logger');
 
+const VENV_WHISPER = path.join(__dirname, '..', 'venv', 'bin', 'whisper');
+
 /**
  * Validiert, dass ein Dateipfad innerhalb des tmp-Verzeichnisses liegt.
  */
@@ -36,8 +38,9 @@ async function transcribeAudio(audioBuffer, ext = '.ogg') {
     await fs.promises.writeFile(tmpFile, audioBuffer);
 
     const text = await new Promise((resolve, reject) => {
+      const whisperBin = fs.existsSync(VENV_WHISPER) ? VENV_WHISPER : 'whisper';
       execFile(
-        'whisper',
+        whisperBin,
         [
           tmpFile,
           '--model', config.whatsapp.whisperModel,
