@@ -11,6 +11,7 @@ const { generateImage, generateVideo, extractImageIntent, extractVideoIntent, ex
 const { transcribeAudio } = require('./whisper');
 const { webSearch, shouldSearch, wantsVoiceReply, buildSearchContext } = require('./search');
 const { textToSpeech } = require('./tts');
+const { downloadYouTubeAudio, downloadYouTubeVideo, searchMyInstants, downloadMyInstant, extractDownloadIntent } = require('./downloader');
 const logger = require('./logger');
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -180,6 +181,57 @@ async function handleWhatsAppMessage(client, msg) {
 
   const chat = await msg.getChat();
   await chat.sendStateTyping();
+
+  // Download-Anfrage erkennen (!yt, !yt-video, !sound + natuerliche Sprache)
+  const downloadIntent = extractDownloadIntent(userText);
+  if (downloadIntent) {
+    await chat.sendStateTyping();
+    try {
+      if (downloadIntent.type === 'yt-audio') {
+        logger.info(`WhatsApp YT-Audio von ${hashedNum}: ${downloadIntent.query}`);
+        await msg.reply('⏳ Lade YouTube-Audio herunter...' + config.footer);
+        const result = await downloadYouTubeAudio(downloadIntent.query);
+        const media = MessageMedia.fromFilePath(result.path);
+        await client.sendMessage(chatId, media, { caption: `🎵 *${result.title}*${config.footer}` });
+        try { fs.unlinkSync(result.path); } catch (_) {}
+        logger.success(`WhatsApp YT-Audio gesendet an ${hashedNum}`);
+        return;
+      }
+      if (downloadIntent.type === 'yt-video') {
+        logger.info(`WhatsApp YT-Video von ${hashedNum}: ${downloadIntent.query}`);
+        await msg.reply('⏳ Lade YouTube-Video herunter...' + config.footer);
+        const result = await downloadYouTubeVideo(downloadIntent.query);
+        const media = MessageMedia.fromFilePath(result.path);
+        await client.sendMessage(chatId, media, { caption: `🎬 *${result.title}*${config.footer}` });
+        try { fs.unlinkSync(result.path); } catch (_) {}
+        logger.success(`WhatsApp YT-Video gesendet an ${hashedNum}`);
+        return;
+      }
+      if (downloadIntent.type === 'sound') {
+        logger.info(`WhatsApp Myinstants von ${hashedNum}: ${downloadIntent.query}`);
+        const results = await searchMyInstants(downloadIntent.query);
+        if (results.length === 0) {
+          await msg.reply(`Kein Sound fuer "${downloadIntent.query}" gefunden.` + config.footer);
+          return;
+        }
+        const best = results[0];
+        const soundPath = await downloadMyInstant(best.soundUrl, best.name);
+        if (!soundPath) {
+          await msg.reply('Sound-Download fehlgeschlagen.' + config.footer);
+          return;
+        }
+        const media = MessageMedia.fromFilePath(soundPath);
+        await client.sendMessage(chatId, media, { caption: `🔊 *${best.name}*${config.footer}` });
+        try { fs.unlinkSync(soundPath); } catch (_) {}
+        logger.success(`WhatsApp Sound gesendet an ${hashedNum}`);
+        return;
+      }
+    } catch (err) {
+      logger.error(`Download fehlgeschlagen: ${err.message}`);
+      await msg.reply(`Download fehlgeschlagen: ${err.message}` + config.footer);
+      return;
+    }
+  }
 
   // Bild-Anfrage erkennen
   const imageIntent = extractImageIntent(userText);
