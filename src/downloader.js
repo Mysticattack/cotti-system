@@ -103,25 +103,44 @@ async function searchMyInstants(query) {
     'Accept': 'application/json',
     'Referer': 'https://www.myinstants.com/',
   };
+  const q = query.trim().toLowerCase();
 
-  // Versuche erst 'search', dann 'name' als Fallback
-  for (const param of ['search', 'name']) {
-    const url = `https://www.myinstants.com/api/v1/instants/?${param}=${encodeURIComponent(query)}&format=json`;
+  // Relevanz-Score: je hoeher, desto besser passend
+  function relevance(name) {
+    const n = (name || '').toLowerCase();
+    if (n === q) return 100;
+    if (n.startsWith(q)) return 80;
+    if (n.includes(q)) return 60;
+    // Teilwoerter pruefen
+    const words = q.split(/\s+/);
+    const hits = words.filter(w => w.length > 2 && n.includes(w)).length;
+    if (hits > 0) return 20 + hits * 10;
+    return 0;
+  }
+
+  for (const param of ['name', 'search']) {
+    // page_size=50 damit wir genug zum Sortieren haben
+    const url = `https://www.myinstants.com/api/v1/instants/?${param}=${encodeURIComponent(query)}&format=json&page_size=50`;
     try {
-      logger.info(`Myinstants API (${param}): ${url}`);
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
-      if (!res.ok) {
-        logger.warn(`Myinstants API HTTP ${res.status} mit param=${param}`);
-        continue;
-      }
+      if (!res.ok) { logger.warn(`Myinstants HTTP ${res.status} (${param})`); continue; }
       const data = await res.json();
-      logger.info(`Myinstants API Antwort: ${data.count ?? '?'} Treffer, ${(data.results || []).length} Ergebnisse`);
-      const results = (data.results || []).slice(0, 5).map(r => ({
+      const raw = (data.results || []).map(r => ({
         name: r.name || r.title || 'Unbekannt',
-        soundUrl: (r.sound || r.sound_url || r.url || '')
+        soundUrl: (r.sound || r.sound_url || '')
           .replace(/^(?!http)/, 'https://www.myinstants.com'),
       })).filter(r => r.soundUrl.includes('myinstants'));
-      if (results.length > 0) return results;
+
+      if (raw.length === 0) continue;
+
+      // Nach Relevanz sortieren, Top 5 zurueckgeben
+      const sorted = raw
+        .map(r => ({ ...r, score: relevance(r.name) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      logger.info(`Myinstants: ${raw.length} Rohergebnisse → Top 5 nach Relevanz fuer "${query}"`);
+      return sorted;
     } catch (err) {
       logger.warn(`Myinstants Suche (${param}) fehlgeschlagen: ${err.message}`);
     }
