@@ -1,4 +1,10 @@
 module.exports = {
+  // Bot-Owner (fuer /abwesend Befehl)
+  owner: {
+    discordId: process.env.OWNER_DISCORD_ID || '',
+    whatsappNumber: process.env.OWNER_WHATSAPP_NUMBER || '',
+  },
+
   // Ollama Einstellungen
   ollama: {
     host: 'http://localhost:11434',
@@ -6,7 +12,7 @@ module.exports = {
     // Maximale Nachrichten im Chatverlauf die mitgeschickt werden
     contextMessages: 10,
     // Timeout in Millisekunden fuer Ollama-Anfragen (120s fuer grosse Modelle)
-    timeout: 120000,
+    timeout: 240000,
   },
 
   // Footer der unter jede Antwort geschrieben wird

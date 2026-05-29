@@ -5,9 +5,12 @@ const { askOllama } = require('./ollama');
 const { webSearch, shouldSearch, buildSearchContext } = require('./search');
 const { downloadYouTubeAudio, downloadYouTubeVideo, searchMyInstants, downloadMyInstant, extractDownloadIntent } = require('./downloader');
 const { openDiscordLogin } = require('./discord-login');
+const { isAway, setAway, scheduleAway, cancelSchedule, parseAwayCommand, getAwayMessage, getStatusMessage } = require('./away');
+const { detectCodeBlocks, codeToFilename, stripCodeBlocks } = require('./code-utils');
 const logger = require('./logger');
 
 const MAX_MESSAGE_LENGTH = 2000;
+const pendingSoundSelections = new Map();
 
 function startDiscord() {
   if (!config.discord.token) {
@@ -47,6 +50,7 @@ async function handleDiscordMessage(client, message) {
   const userId = message.author.id;
   const isDM = message.channel.type === 'DM';
   const isMention = message.mentions.has(client.user);
+  const chatId = isDM ? `discord_dm_${userId}` : `discord_ch_${message.channel.id}`;
 
   // Blockliste pruefen
   if (config.discord.blocklist.includes(userId)) {
@@ -76,6 +80,34 @@ async function handleDiscordMessage(client, message) {
     await message.reply(`Nachricht auf ${MAX_MESSAGE_LENGTH} Zeichen gekuerzt.` + config.footer);
   }
 
+  // /abwesend Befehl
+  const awayCmd = parseAwayCommand(userText);
+  if (awayCmd) {
+    const isOwner = !config.owner?.discordId || userId === config.owner.discordId;
+    if (!isOwner) {
+      await message.reply(isAway('discord') ? getStatusMessage('discord') : 'Kein Away-Modus aktiv.');
+      return;
+    }
+    if (awayCmd.off) {
+      setAway(awayCmd.platform, false);
+      cancelSchedule(awayCmd.platform);
+      await message.reply(`Away-Modus deaktiviert (${awayCmd.platform}).`);
+    } else if (awayCmd.time) {
+      scheduleAway(awayCmd.platform, awayCmd.time);
+      await message.reply(`Away-Modus wird in ${awayCmd.time} Minuten aktiviert (${awayCmd.platform}).`);
+    } else {
+      setAway(awayCmd.platform, true);
+      await message.reply(`Away-Modus aktiviert (${awayCmd.platform}).`);
+    }
+    return;
+  }
+
+  // Away-Modus aktiv -> Abwesenheitsnachricht senden
+  if (isAway('discord')) {
+    await message.reply(getAwayMessage());
+    return;
+  }
+
   logger.info(`Discord-Nachricht von ${message.author.tag} (${isDM ? 'DM' : 'Mention'})`);
 
   // Chatverlauf aus Discord Channel laden (letzte Nachrichten als Kontext)
@@ -97,6 +129,36 @@ async function handleDiscordMessage(client, message) {
       }
     } catch (err) {
       logger.warn(`Discord Chatverlauf konnte nicht geladen werden: ${err.message}`);
+    }
+  }
+
+  // Pending Sound-Auswahl: User hat Zahl 1-5 eingegeben
+  const pendingSound = pendingSoundSelections.get(chatId);
+  if (pendingSound) {
+    if (Date.now() > pendingSound.expiresAt) {
+      pendingSoundSelections.delete(chatId);
+    } else {
+      const choice = parseInt(userText.trim());
+      if (!isNaN(choice) && choice >= 1 && choice <= pendingSound.results.length) {
+        pendingSoundSelections.delete(chatId);
+        await message.channel.sendTyping();
+        const picked = pendingSound.results[choice - 1];
+        try {
+          const soundPath = await downloadMyInstant(picked.soundUrl, picked.name);
+          if (!soundPath) { await message.reply('Sound-Download fehlgeschlagen.' + config.footer); return; }
+          await message.channel.send({
+            content: `\uD83D\uDD0A **${picked.name}**${config.footer}`,
+            files: [new MessageAttachment(soundPath, `${picked.name}.mp3`)],
+          });
+          try { fs.unlinkSync(soundPath); } catch (_) {}
+          logger.success(`Discord Sound gesendet: ${picked.name}`);
+        } catch (err) {
+          await message.reply(`Sound-Download fehlgeschlagen: ${err.message}`);
+        }
+        return;
+      } else {
+        pendingSoundSelections.delete(chatId);
+      }
     }
   }
 
@@ -141,21 +203,12 @@ async function handleDiscordMessage(client, message) {
         logger.info(`Discord Myinstants von ${message.author.tag}: ${downloadIntent.query}`);
         const results = await searchMyInstants(downloadIntent.query);
         if (results.length === 0) {
-          await message.reply(`Kein Sound fuer "${downloadIntent.query}" gefunden.`);
+          await message.reply(`Kein Sound fuer "${downloadIntent.query}" gefunden.` + config.footer);
           return;
         }
-        const best = results[0];
-        const soundPath = await downloadMyInstant(best.soundUrl, best.name);
-        if (!soundPath) {
-          await message.reply('Sound-Download fehlgeschlagen.');
-          return;
-        }
-        await message.channel.send({
-          content: `🔊 **${best.name}**${config.footer}`,
-          files: [new MessageAttachment(soundPath, `${best.name}.mp3`)],
-        });
-        try { fs.unlinkSync(soundPath); } catch (_) {}
-        logger.success(`Discord Sound gesendet an ${message.author.tag}`);
+        const list = results.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
+        pendingSoundSelections.set(chatId, { results, expiresAt: Date.now() + 60000 });
+        await message.reply(`\uD83D\uDD0A **${results.length} Treffer fuer "${downloadIntent.query}":**\n${list}\n\nNummer eingeben (1\u2013${results.length}):`);
         return;
       }
     } catch (err) {
@@ -183,17 +236,24 @@ async function handleDiscordMessage(client, message) {
   }
 
   try {
-    // Eindeutige Chat-ID (DM = User-ID, Server = Channel-ID)
-    const chatId = isDM ? `discord_dm_${userId}` : `discord_ch_${message.channel.id}`;
-
     const reply = await askOllama(chatId, fullPrompt, 'Discord', searchContext);
 
-    // Discord hat 2000-Zeichen-Limit -> ggf. aufteilen
-    const fullReply = reply + config.footer;
-    const chunks = splitMessage(fullReply, 1990);
-
-    for (const chunk of chunks) {
-      await message.reply(chunk);
+    const codeBlocks = detectCodeBlocks(reply);
+    if (codeBlocks.length > 0) {
+      const explanation = stripCodeBlocks(reply);
+      if (explanation) {
+        const chunks = splitMessage(explanation + config.footer, 1990);
+        for (const chunk of chunks) { await message.reply(chunk); }
+      }
+      for (let i = 0; i < codeBlocks.length; i++) {
+        const { lang, code } = codeBlocks[i];
+        await message.channel.send({
+          files: [new MessageAttachment(Buffer.from(code, 'utf8'), codeToFilename(lang, i))],
+        });
+      }
+    } else {
+      const chunks = splitMessage(reply + config.footer, 1990);
+      for (const chunk of chunks) { await message.reply(chunk); }
     }
 
     logger.success(`Discord geantwortet an ${message.author.tag}`);

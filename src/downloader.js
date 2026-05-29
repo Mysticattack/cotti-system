@@ -194,6 +194,10 @@ function extractDownloadIntent(text) {
     /(?:schick|hol|lad|zeig|spiel)\s+(?:mir\s+)?(?:den\s+|einen?\s+)?sound\s+(?:von\s+|von\s+myinstants\s+)?(.+)/i,
     /(?:sound\s+von\s+|myinstants?\s+)(.+)/i,
     /(?:lad|lade|download|hol)\s+(?:mir\s+)?(?:den\s+)?sound\s+(.+)/i,
+    /kannst\s+du\s+(?:mir\s+)?(?:den\s+)?sound\s+(.+?)\s+schicken?/i,
+    /kannst\s+du\s+(?:mir\s+)?(.+?)\s+als\s+sound\s+schicken?/i,
+    /(?:such|suche|find|finde)\s+(?:mir\s+)?(?:den\s+)?sound\s+(?:von\s+)?(.+)/i,
+    /(?:gibt\s+es\s+)?(?:einen?\s+)?sound\s+(?:von\s+|zu\s+|mit\s+)?(.+)/i,
   ];
   for (const p of soundPatterns) {
     const m = t.match(p);

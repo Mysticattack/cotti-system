@@ -12,9 +12,12 @@ const { transcribeAudio } = require('./whisper');
 const { webSearch, shouldSearch, wantsVoiceReply, buildSearchContext } = require('./search');
 const { textToSpeech } = require('./tts');
 const { downloadYouTubeAudio, downloadYouTubeVideo, searchMyInstants, downloadMyInstant, extractDownloadIntent } = require('./downloader');
+const { isAway, setAway, scheduleAway, cancelSchedule, parseAwayCommand, getAwayMessage, getStatusMessage } = require('./away');
+const { detectCodeBlocks, codeToFilename, stripCodeBlocks, langToMimeType } = require('./code-utils');
 const logger = require('./logger');
 
 const MAX_MESSAGE_LENGTH = 2000;
+const pendingSoundSelections = new Map();
 
 /**
  * Hasht eine Telefonnummer fuer datenschutzkonformes Logging.
@@ -177,10 +180,66 @@ async function handleWhatsAppMessage(client, msg) {
     await msg.reply(`Nachricht auf ${MAX_MESSAGE_LENGTH} Zeichen gekuerzt.` + config.footer);
   }
 
+  // /abwesend Befehl
+  const awayCmd = parseAwayCommand(userText);
+  if (awayCmd) {
+    const isOwner = !config.owner?.whatsappNumber || number === config.owner.whatsappNumber;
+    if (!isOwner) {
+      await msg.reply(isAway('whatsapp') ? getStatusMessage('whatsapp') : 'Kein Away-Modus aktiv.' + config.footer);
+      return;
+    }
+    if (awayCmd.off) {
+      setAway(awayCmd.platform, false);
+      cancelSchedule(awayCmd.platform);
+      await msg.reply(`Away-Modus deaktiviert (${awayCmd.platform}).` + config.footer);
+    } else if (awayCmd.time) {
+      scheduleAway(awayCmd.platform, awayCmd.time);
+      await msg.reply(`Away-Modus wird in ${awayCmd.time} Minuten aktiviert (${awayCmd.platform}).` + config.footer);
+    } else {
+      setAway(awayCmd.platform, true);
+      await msg.reply(`Away-Modus aktiviert (${awayCmd.platform}).` + config.footer);
+    }
+    return;
+  }
+
+  // Away-Modus aktiv -> Abwesenheitsnachricht senden
+  if (isAway('whatsapp')) {
+    await msg.reply(getAwayMessage());
+    return;
+  }
+
   logger.info(`WhatsApp von ${hashedNum}: ${userText.length} Zeichen`);
 
   const chat = await msg.getChat();
   await chat.sendStateTyping();
+
+  // Pending Sound-Auswahl: User hat Zahl 1-5 eingegeben
+  const pendingSound = pendingSoundSelections.get(chatId);
+  if (pendingSound) {
+    if (Date.now() > pendingSound.expiresAt) {
+      pendingSoundSelections.delete(chatId);
+    } else {
+      const choice = parseInt(userText.trim());
+      if (!isNaN(choice) && choice >= 1 && choice <= pendingSound.results.length) {
+        pendingSoundSelections.delete(chatId);
+        await chat.sendStateTyping();
+        const picked = pendingSound.results[choice - 1];
+        try {
+          const soundPath = await downloadMyInstant(picked.soundUrl, picked.name);
+          if (!soundPath) { await msg.reply('Sound-Download fehlgeschlagen.' + config.footer); return; }
+          const media = MessageMedia.fromFilePath(soundPath);
+          await client.sendMessage(chatId, media, { caption: `\uD83D\uDD0A *${picked.name}*${config.footer}` });
+          try { fs.unlinkSync(soundPath); } catch (_) {}
+          logger.success(`WhatsApp Sound gesendet: ${picked.name}`);
+        } catch (err) {
+          await msg.reply(`Sound-Download fehlgeschlagen: ${err.message}` + config.footer);
+        }
+        return;
+      } else {
+        pendingSoundSelections.delete(chatId);
+      }
+    }
+  }
 
   // Download-Anfrage erkennen (!yt, !yt-video, !sound + natuerliche Sprache)
   const downloadIntent = extractDownloadIntent(userText);
@@ -214,16 +273,9 @@ async function handleWhatsAppMessage(client, msg) {
           await msg.reply(`Kein Sound fuer "${downloadIntent.query}" gefunden.` + config.footer);
           return;
         }
-        const best = results[0];
-        const soundPath = await downloadMyInstant(best.soundUrl, best.name);
-        if (!soundPath) {
-          await msg.reply('Sound-Download fehlgeschlagen.' + config.footer);
-          return;
-        }
-        const media = MessageMedia.fromFilePath(soundPath);
-        await client.sendMessage(chatId, media, { caption: `🔊 *${best.name}*${config.footer}` });
-        try { fs.unlinkSync(soundPath); } catch (_) {}
-        logger.success(`WhatsApp Sound gesendet an ${hashedNum}`);
+        const list = results.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
+        pendingSoundSelections.set(chatId, { results, expiresAt: Date.now() + 60000 });
+        await msg.reply(`\uD83D\uDD0A *${results.length} Treffer fuer "${downloadIntent.query}":*\n${list}\n\nNummer eingeben (1-${results.length}):${config.footer}`);
         return;
       }
     } catch (err) {
@@ -321,8 +373,25 @@ async function handleWhatsAppMessage(client, msg) {
     }
   }
 
-  await msg.reply(reply + config.footer);
-  logger.success(`WhatsApp geantwortet an ${hashedNum}`);
+  // Code-Bloecke als Dokument senden
+  const codeBlocks = detectCodeBlocks(reply);
+  if (codeBlocks.length > 0) {
+    const explanation = stripCodeBlocks(reply);
+    if (explanation) await msg.reply(explanation + config.footer);
+    for (let i = 0; i < codeBlocks.length; i++) {
+      const { lang, code } = codeBlocks[i];
+      const media = new MessageMedia(
+        langToMimeType(lang),
+        Buffer.from(code, 'utf8').toString('base64'),
+        codeToFilename(lang, i)
+      );
+      await client.sendMessage(chatId, media);
+    }
+    logger.success(`WhatsApp Code-Datei(en) gesendet an ${hashedNum}`);
+  } else {
+    await msg.reply(reply + config.footer);
+    logger.success(`WhatsApp geantwortet an ${hashedNum}`);
+  }
 }
 
 module.exports = { startWhatsApp };
