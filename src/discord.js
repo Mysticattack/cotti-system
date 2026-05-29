@@ -81,6 +81,39 @@ async function handleDiscordMessage(client, message) {
     await message.reply(`Nachricht auf ${MAX_MESSAGE_LENGTH} Zeichen gekuerzt.` + config.footer);
   }
 
+  // /hilfe Befehl
+  if (/^\/hilfe\b/i.test(userText) || /^!hilfe\b/i.test(userText) || /^!help\b/i.test(userText)) {
+    const isOwner = !config.owner?.discordId || userId === config.owner.discordId;
+    await message.reply([
+      '```',
+      '=== Cotti System – Befehle ===',
+      '',
+      '-- Abwesenheit (nur Owner) --',
+      '/abwesend -all          Weg-Modus alle Plattformen an',
+      '/abwesend -dc           Nur Discord an',
+      '/abwesend -wh           Nur WhatsApp an',
+      '/abwesend -all -time 20 In 20 Min aktivieren',
+      '/abwesend off           Deaktivieren',
+      '',
+      '-- Abwesenheit (jeder) --',
+      '/abwesend               Status anzeigen (wann aktiv seit)',
+      '',
+      '-- Downloads --',
+      '!yt <YouTube-URL>       Audio als MP3',
+      '!yt-video <URL>         Video als MP4',
+      '!sound <Begriff>        Sound suchen (5 Treffer)',
+      '',
+      '-- KI / Generierung --',
+      'Einfach schreiben       KI-Chat (Ollama)',
+      'Erstelle ein Bild von … Bildgenerierung',
+      'Erstelle ein Video von … Videogenerierung',
+      '',
+      isOwner ? '(Du bist als Owner erkannt)' : '(Owner-Befehle benoetigen OWNER_DISCORD_ID in .env)',
+      '```',
+    ].join('\n'));
+    return;
+  }
+
   // /abwesend Befehl
   const awayCmd = parseAwayCommand(userText);
   if (awayCmd) {

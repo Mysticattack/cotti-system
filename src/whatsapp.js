@@ -180,6 +180,37 @@ async function handleWhatsAppMessage(client, msg) {
     await msg.reply(`Nachricht auf ${MAX_MESSAGE_LENGTH} Zeichen gekuerzt.` + config.footer);
   }
 
+  // /hilfe Befehl
+  if (/^\/hilfe\b/i.test(userText) || /^!hilfe\b/i.test(userText) || /^!help\b/i.test(userText)) {
+    const isOwner = !config.owner?.whatsappNumber || number === config.owner.whatsappNumber;
+    await msg.reply([
+      '=== Cotti System - Befehle ===',
+      '',
+      '-- Abwesenheit (nur Owner) --',
+      '/abwesend -all          Alle Plattformen an',
+      '/abwesend -dc           Nur Discord an',
+      '/abwesend -wh           Nur WhatsApp an',
+      '/abwesend -all -time 20 In 20 Min aktivieren',
+      '/abwesend off           Deaktivieren',
+      '',
+      '-- Abwesenheit (jeder) --',
+      '/abwesend               Status anzeigen',
+      '',
+      '-- Downloads --',
+      '!yt <YouTube-URL>       Audio als MP3',
+      '!yt-video <URL>         Video als MP4',
+      '!sound <Begriff>        Sound suchen (5 Treffer)',
+      '',
+      '-- KI / Generierung --',
+      'Einfach schreiben       KI-Chat (Ollama)',
+      'Erstelle ein Bild von   Bildgenerierung',
+      'Erstelle ein Video von  Videogenerierung',
+      '',
+      isOwner ? '(Du bist als Owner erkannt)' : '(Owner-Befehle benoetigen OWNER_WHATSAPP_NUMBER in .env)',
+    ].join('\n') + config.footer);
+    return;
+  }
+
   // /abwesend Befehl
   const awayCmd = parseAwayCommand(userText);
   if (awayCmd) {
