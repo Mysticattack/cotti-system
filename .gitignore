@@ -129,6 +129,10 @@ conversations/
 shared-files/*
 !shared-files/.gitkeep
 
+# 💾 DATA (user-specific runtime data)
+data/
+!data/.gitkeep
+
 # � WHATSAPP BOT (lokale Kopie, nicht im Repo)
 Whatsapp_Bot/
 

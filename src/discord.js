@@ -6,6 +6,7 @@ const { webSearch, shouldSearch, buildSearchContext } = require('./search');
 const { downloadYouTubeAudio, downloadYouTubeVideo, searchMyInstants, downloadMyInstant, extractDownloadIntent } = require('./downloader');
 const { openDiscordLogin } = require('./discord-login');
 const { isAway, setAway, scheduleAway, cancelSchedule, parseAwayCommand, getAwayMessage, getStatusMessage } = require('./away');
+const blocklistMgr = require('./blocklist');
 const { detectCodeBlocks, codeToFilename, stripCodeBlocks } = require('./code-utils');
 const logger = require('./logger');
 
@@ -53,8 +54,8 @@ async function handleDiscordMessage(client, message) {
   const isMention = message.mentions.has(client.user);
   const chatId = isDM ? `discord_dm_${userId}` : `discord_ch_${message.channel.id}`;
 
-  // Blockliste pruefen
-  if (config.discord.blocklist.includes(userId)) {
+  // Blockliste pruefen (statisch + dynamisch)
+  if (blocklistMgr.isBlocked('discord', userId, config.discord.blocklist)) {
     logger.info(`Ignoriere blockierten Discord User: ${userId}`);
     return;
   }
@@ -81,22 +82,58 @@ async function handleDiscordMessage(client, message) {
     await message.reply(`Nachricht auf ${MAX_MESSAGE_LENGTH} Zeichen gekuerzt.` + config.footer);
   }
 
+  // /block und /unblock Befehle (Owner only)
+  const blockMatch = userText.match(/^\/block\s+(\S+)/i);
+  const unblockMatch = userText.match(/^\/unblock\s+(\S+)/i);
+  if (blockMatch || unblockMatch) {
+    const isOwner = config.owner?.discordId && userId === config.owner.discordId;
+    if (!isOwner) { await message.reply('Nur der Owner kann die Blockliste verwalten.'); return; }
+    if (blockMatch) {
+      const targetId = blockMatch[1];
+      const added = blocklistMgr.block('discord', targetId);
+      await message.reply(added ? `\u2705 ${targetId} zur Blockliste hinzugefuegt.` : `${targetId} ist bereits blockiert.`);
+    } else {
+      const targetId = unblockMatch[1];
+      const removed = blocklistMgr.unblock('discord', targetId);
+      await message.reply(removed ? `\u2705 ${targetId} von der Blockliste entfernt.` : `${targetId} war nicht blockiert.`);
+    }
+    return;
+  }
+
+  // /blocklist Befehl (Owner only)
+  if (/^\/blocklist\b/i.test(userText)) {
+    const isOwner = config.owner?.discordId && userId === config.owner.discordId;
+    if (!isOwner) { await message.reply('Nur der Owner kann die Blockliste einsehen.'); return; }
+    const dynamic = blocklistMgr.list('discord');
+    const stat = config.discord.blocklist || [];
+    const all = [...new Set([...stat, ...dynamic])];
+    await message.reply(all.length > 0
+      ? `Blockierte Accounts (${all.length}):\n${all.map((id, i) => `${i + 1}. ${id}${dynamic.includes(id) ? '' : ' (config)'}`).join('\n')}`
+      : 'Keine Accounts blockiert.');
+    return;
+  }
+
   // /hilfe Befehl
   if (/^\/hilfe\b/i.test(userText) || /^!hilfe\b/i.test(userText) || /^!help\b/i.test(userText)) {
-    const isOwner = !config.owner?.discordId || userId === config.owner.discordId;
+    const isOwner = config.owner?.discordId && userId === config.owner.discordId;
     await message.reply([
       '```',
       '=== Cotti System – Befehle ===',
       '',
       '-- Abwesenheit (nur Owner) --',
-      '/abwesend -all          Weg-Modus alle Plattformen an',
+      '/abwesend -all          Alle Plattformen an',
       '/abwesend -dc           Nur Discord an',
       '/abwesend -wh           Nur WhatsApp an',
       '/abwesend -all -time 20 In 20 Min aktivieren',
       '/abwesend off           Deaktivieren',
       '',
       '-- Abwesenheit (jeder) --',
-      '/abwesend               Status anzeigen (wann aktiv seit)',
+      '/abwesend               Status (wann aktiv seit)',
+      '',
+      '-- Blockliste (nur Owner) --',
+      '/block <UserID>         Account blockieren',
+      '/unblock <UserID>       Account entsperren',
+      '/blocklist              Alle blockierten Accounts',
       '',
       '-- Downloads --',
       '!yt <YouTube-URL>       Audio als MP3',
@@ -117,7 +154,7 @@ async function handleDiscordMessage(client, message) {
   // /abwesend Befehl
   const awayCmd = parseAwayCommand(userText);
   if (awayCmd) {
-    const isOwner = !config.owner?.discordId || userId === config.owner.discordId;
+    const isOwner = config.owner?.discordId && userId === config.owner.discordId;
     if (!isOwner) {
       await message.reply(isAway('discord') ? getStatusMessage('discord') : 'Kein Away-Modus aktiv.');
       return;

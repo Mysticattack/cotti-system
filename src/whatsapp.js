@@ -13,6 +13,7 @@ const { webSearch, shouldSearch, wantsVoiceReply, buildSearchContext } = require
 const { textToSpeech } = require('./tts');
 const { downloadYouTubeAudio, downloadYouTubeVideo, searchMyInstants, downloadMyInstant, extractDownloadIntent } = require('./downloader');
 const { isAway, setAway, scheduleAway, cancelSchedule, parseAwayCommand, getAwayMessage, getStatusMessage } = require('./away');
+const blocklistMgr = require('./blocklist');
 const { detectCodeBlocks, codeToFilename, stripCodeBlocks, langToMimeType } = require('./code-utils');
 const logger = require('./logger');
 
@@ -131,7 +132,7 @@ async function handleWhatsAppMessage(client, msg) {
   if (msg.fromMe) return;
   if (isGroup) return;
 
-  if (config.whatsapp.blocklist.includes(number)) {
+  if (blocklistMgr.isBlocked('whatsapp', number, config.whatsapp.blocklist)) {
     logger.info(`Ignoriere blockierten Kontakt: ${hashedNum}`);
     return;
   }
@@ -182,7 +183,7 @@ async function handleWhatsAppMessage(client, msg) {
 
   // /hilfe Befehl
   if (/^\/hilfe\b/i.test(userText) || /^!hilfe\b/i.test(userText) || /^!help\b/i.test(userText)) {
-    const isOwner = !config.owner?.whatsappNumber || number === config.owner.whatsappNumber;
+    const isOwner = config.owner?.whatsappNumber && number === config.owner.whatsappNumber;
     await msg.reply([
       '=== Cotti System - Befehle ===',
       '',
@@ -195,6 +196,11 @@ async function handleWhatsAppMessage(client, msg) {
       '',
       '-- Abwesenheit (jeder) --',
       '/abwesend               Status anzeigen',
+      '',
+      '-- Blockliste (nur Owner) --',
+      '/block <Nummer>         Nummer blockieren',
+      '/unblock <Nummer>       Nummer entsperren',
+      '/blocklist              Alle blockierten Nummern',
       '',
       '-- Downloads --',
       '!yt <YouTube-URL>       Audio als MP3',
@@ -214,7 +220,7 @@ async function handleWhatsAppMessage(client, msg) {
   // /abwesend Befehl
   const awayCmd = parseAwayCommand(userText);
   if (awayCmd) {
-    const isOwner = !config.owner?.whatsappNumber || number === config.owner.whatsappNumber;
+    const isOwner = config.owner?.whatsappNumber && number === config.owner.whatsappNumber;
     if (!isOwner) {
       await msg.reply(isAway('whatsapp') ? getStatusMessage('whatsapp') : 'Kein Away-Modus aktiv.' + config.footer);
       return;
