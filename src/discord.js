@@ -44,8 +44,9 @@ function startDiscord() {
 
 async function handleDiscordMessage(client, message) {
   // Eigene Nachrichten und andere Bots ignorieren
-  if (message.author.bot) return;
   if (!message.author) return;
+  if (message.author.id === client.user?.id) return;
+  if (message.author.bot) return;
 
   const userId = message.author.id;
   const isDM = message.channel.type === 'DM';
