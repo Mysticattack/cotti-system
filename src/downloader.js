@@ -98,23 +98,35 @@ async function downloadYouTubeVideo(url) {
  * @returns {Promise<Array<{name: string, soundUrl: string}>>}
  */
 async function searchMyInstants(query) {
-  const url = `https://www.myinstants.com/api/v1/instants/?name=${encodeURIComponent(query)}&format=json`;
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const results = (data.results || []).slice(0, 5).map(r => ({
-      name: r.name,
-      soundUrl: r.sound.startsWith('http') ? r.sound : `https://www.myinstants.com${r.sound}`,
-    }));
-    return results;
-  } catch (err) {
-    logger.error(`Myinstants Suche fehlgeschlagen: ${err.message}`);
-    return [];
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json',
+    'Referer': 'https://www.myinstants.com/',
+  };
+
+  // Versuche erst 'search', dann 'name' als Fallback
+  for (const param of ['search', 'name']) {
+    const url = `https://www.myinstants.com/api/v1/instants/?${param}=${encodeURIComponent(query)}&format=json`;
+    try {
+      logger.info(`Myinstants API (${param}): ${url}`);
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        logger.warn(`Myinstants API HTTP ${res.status} mit param=${param}`);
+        continue;
+      }
+      const data = await res.json();
+      logger.info(`Myinstants API Antwort: ${data.count ?? '?'} Treffer, ${(data.results || []).length} Ergebnisse`);
+      const results = (data.results || []).slice(0, 5).map(r => ({
+        name: r.name || r.title || 'Unbekannt',
+        soundUrl: (r.sound || r.sound_url || r.url || '')
+          .replace(/^(?!http)/, 'https://www.myinstants.com'),
+      })).filter(r => r.soundUrl.includes('myinstants'));
+      if (results.length > 0) return results;
+    } catch (err) {
+      logger.warn(`Myinstants Suche (${param}) fehlgeschlagen: ${err.message}`);
+    }
   }
+  return [];
 }
 
 /**
@@ -127,15 +139,21 @@ async function downloadMyInstant(soundUrl, name = 'sound') {
   const safeName = name.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
   const outPath = path.join(os.tmpdir(), `cotti_sound_${safeName}_${Date.now()}.mp3`);
 
+  logger.info(`Myinstants Download: ${soundUrl}`);
   try {
     const res = await fetch(soundUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(15000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.myinstants.com/',
+        'Accept': 'audio/mpeg,audio/*,*/*',
+      },
+      signal: AbortSignal.timeout(20000),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fuer ${soundUrl}`);
     const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length < 1000) throw new Error(`Datei zu klein (${buffer.length} Bytes) – kein gueltiger Sound`);
     fs.writeFileSync(outPath, buffer);
-    logger.success(`Myinstants Sound heruntergeladen: ${name}`);
+    logger.success(`Myinstants Sound heruntergeladen: ${name} (${(buffer.length/1024).toFixed(1)} KB)`);
     return outPath;
   } catch (err) {
     logger.error(`Myinstants Download fehlgeschlagen: ${err.message}`);

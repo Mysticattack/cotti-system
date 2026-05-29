@@ -1,0 +1,21 @@
+{
+  "watch": [
+    "src/",
+    "config.js",
+    "index.js",
+    "data/blocklist.json"
+  ],
+  "ignore": [
+    "node_modules/",
+    "sessions/",
+    ".wwebjs_cache/",
+    "shared-files/",
+    "logs/",
+    "data/*.log",
+    "venv/"
+  ],
+  "ext": "js,json",
+  "delay": "1000",
+  "signal": "SIGTERM",
+  "verbose": false
+}
